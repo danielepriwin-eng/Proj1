@@ -7,6 +7,7 @@ interface MetricCardProps {
   accent?: "orange" | "green" | "blue" | "yellow" | "muted";
   size?: "sm" | "md" | "lg";
   badge?: string;
+  isLoading?: boolean;
 }
 
 const accentColors = {
@@ -26,10 +27,28 @@ export default function MetricCard({
   accent = "orange",
   size = "md",
   badge,
+  isLoading,
 }: MetricCardProps) {
   const color = accentColors[accent];
   const isPositive = change !== undefined && change > 0;
   const isNegative = change !== undefined && change < 0;
+
+  if (isLoading) {
+    return (
+      <div
+        className="relative overflow-hidden p-4"
+        style={{
+          backgroundColor: "var(--bg-card)",
+          border: "1px solid var(--border)",
+          borderTop: `2px solid ${color}`,
+        }}
+      >
+        <div className="h-2 w-16 rounded mb-3" style={{ backgroundColor: "var(--border-bright)", opacity: 0.6 }} />
+        <div className="h-5 w-20 rounded mb-2" style={{ backgroundColor: "var(--border-bright)", opacity: 0.5 }} />
+        <div className="h-2 w-12 rounded" style={{ backgroundColor: "var(--border-bright)", opacity: 0.4 }} />
+      </div>
+    );
+  }
 
   return (
     <div

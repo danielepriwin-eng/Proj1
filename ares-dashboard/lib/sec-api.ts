@@ -1,29 +1,25 @@
 /**
- * SEC EDGAR API client for Ares Core Infrastructure Partners
+ * SEC EDGAR API client for Ares Core Infrastructure Fund
  *
- * SEC EDGAR public APIs (no auth required, User-Agent header required):
- *   - Search:      https://efts.sec.gov/LATEST/search-index?q=...&forms=...
- *   - Submissions: https://data.sec.gov/submissions/CIK{10-digit}.json
- *   - Facts:       https://data.sec.gov/api/xbrl/companyfacts/CIK{10-digit}.json
+ * Fund: Ares Core Infrastructure Fund (Delaware statutory trust, BDC)
+ * CIK:  0002031750
+ * Formed: May 7, 2024 · Fiscal Year End: December 31
+ * Manager: Ares Capital Management II LLC
  *
- * Ares Core Infrastructure Partners files Form D, N-2, and related forms.
- * CIK: 0001803164 (Ares Core Infrastructure Partners, L.P.)
+ * SEC EDGAR public APIs (CORS-enabled — call from browser, not server):
+ *   Submissions:    https://data.sec.gov/submissions/CIK{10-digit}.json
+ *   Company facts:  https://data.sec.gov/api/xbrl/companyfacts/CIK{10-digit}.json
+ *   Filing archive: https://data.sec.gov/Archives/edgar/data/{cik}/{accession}/
+ *
+ * BDC files 10-K (annual) and 10-Q (quarterly) — not N-PORT or N-CSR.
+ * Most recent 10-K: accession 0001628280-25-012670, filed 2025-03-13
  */
 
 const SEC_BASE = "https://data.sec.gov";
-const SEC_SEARCH = "https://efts.sec.gov/LATEST/search-index";
 const USER_AGENT = "AresDashboard contact@example.com";
-const ARES_CIK = "0001803164";
+export const ARES_CIK = "0002031750";
 
-export interface SecFiling {
-  accessionNumber: string;
-  filingDate: string;
-  reportDate: string;
-  form: string;
-  primaryDocument: string;
-  description: string;
-  items: string;
-}
+// ─── SEC API types ─────────────────────────────────────────────────────────────
 
 export interface CompanySubmissions {
   cik: string;
@@ -32,7 +28,12 @@ export interface CompanySubmissions {
   sicDescription: string;
   stateOfIncorporation: string;
   addresses: {
-    business?: { street1: string; city: string; stateOrCountry: string; zipCode: string };
+    business?: {
+      street1: string;
+      city: string;
+      stateOrCountry: string;
+      zipCode: string;
+    };
   };
   filings: {
     recent: {
@@ -47,23 +48,37 @@ export interface CompanySubmissions {
   };
 }
 
-export interface SearchResult {
-  hits: {
-    hits: Array<{
-      _id: string;
-      _source: {
-        period_of_report: string;
-        entity_name: string;
-        file_date: string;
-        form_type: string;
-        file_num: string;
-      };
-    }>;
-    total: { value: number };
+export interface SecFiling {
+  accessionNumber: string;
+  filingDate: string;
+  reportDate: string;
+  form: string;
+  primaryDocument?: string;
+  description: string;
+  url: string;
+}
+
+export interface CompanyFact {
+  label: string;
+  description: string;
+  units: {
+    USD?: Array<{ end: string; val: number; form: string; accn: string }>;
+    shares?: Array<{ end: string; val: number; form: string; accn: string }>;
   };
 }
 
-const headers = { "User-Agent": USER_AGENT };
+export interface CompanyFacts {
+  cik: number;
+  entityName: string;
+  facts: {
+    "us-gaap"?: Record<string, CompanyFact>;
+    "invest"?: Record<string, CompanyFact>;
+  };
+}
+
+// ─── SEC API fetch functions (client-side CORS calls) ─────────────────────────
+
+const hdrs = { "User-Agent": USER_AGENT };
 
 export async function fetchCompanySubmissions(
   cik: string = ARES_CIK
@@ -71,8 +86,7 @@ export async function fetchCompanySubmissions(
   try {
     const padded = cik.replace(/^0+/, "").padStart(10, "0");
     const res = await fetch(`${SEC_BASE}/submissions/CIK${padded}.json`, {
-      headers,
-      next: { revalidate: 3600 },
+      headers: hdrs,
     });
     if (!res.ok) return null;
     return res.json();
@@ -81,16 +95,15 @@ export async function fetchCompanySubmissions(
   }
 }
 
-export async function searchSecFilings(
-  query: string = '"Ares Core Infrastructure"',
-  forms: string = "N-PORT,N-CSR,N-2,D,ADV"
-): Promise<SearchResult | null> {
+export async function fetchCompanyFacts(
+  cik: string = ARES_CIK
+): Promise<CompanyFacts | null> {
   try {
-    const params = new URLSearchParams({ q: query, forms });
-    const res = await fetch(`${SEC_SEARCH}?${params}`, {
-      headers,
-      next: { revalidate: 3600 },
-    });
+    const padded = cik.replace(/^0+/, "").padStart(10, "0");
+    const res = await fetch(
+      `${SEC_BASE}/api/xbrl/companyfacts/CIK${padded}.json`,
+      { headers: hdrs }
+    );
     if (!res.ok) return null;
     return res.json();
   } catch {
@@ -98,304 +111,334 @@ export async function searchSecFilings(
   }
 }
 
-export function parseFiling(submissions: CompanySubmissions): SecFiling[] {
+export function parseFilings(submissions: CompanySubmissions): SecFiling[] {
   const r = submissions.filings.recent;
-  return r.accessionNumber.map((acc, i) => ({
-    accessionNumber: acc,
-    filingDate: r.filingDate[i],
-    reportDate: r.reportDate[i] ?? "",
-    form: r.form[i],
-    primaryDocument: r.primaryDocument[i],
-    description: r.description[i] ?? "",
-    items: r.items[i] ?? "",
-  }));
+  const cikNum = submissions.cik.replace(/^0+/, "");
+  return r.accessionNumber
+    .map((acc, i) => ({
+      accessionNumber: acc,
+      filingDate: r.filingDate[i],
+      reportDate: r.reportDate[i] ?? "",
+      form: r.form[i],
+      primaryDocument: r.primaryDocument[i],
+      description: r.description[i] ?? "",
+      url: `https://www.sec.gov/Archives/edgar/data/${cikNum}/${acc.replace(/-/g, "")}/`,
+    }))
+    .filter((f) => ["10-K", "10-Q", "10-12G", "S-1", "S-1/A", "DEF 14A"].includes(f.form))
+    .slice(0, 12);
 }
 
-// ─── Mock data (rendered when SEC API unreachable) ───────────────────────────
+/** Extract NAV history from XBRL company facts */
+export function extractNavHistory(
+  facts: CompanyFacts
+): Array<{ quarter: string; nav: number; navPerUnit: number }> {
+  const gaap = facts.facts?.["us-gaap"] ?? {};
+  const netAssets =
+    gaap["NetAssets"]?.units?.USD ??
+    gaap["AssetsNet"]?.units?.USD ??
+    gaap["NetAssetsExcludingPortfolioInvestmentsMeasuredAtFairValue"]?.units?.USD ??
+    [];
 
-export const MOCK_FUND_INFO = {
-  name: "Ares Core Infrastructure Partners, L.P.",
-  cik: "0001803164",
-  manager: "Ares Management Corporation",
-  fundType: "Private Evergreen Infrastructure Fund",
-  strategy: "Core / Core-Plus Infrastructure",
-  geography: "North America, Europe",
-  vintage: "2021",
-  reportingCurrency: "USD",
-  fiscalYearEnd: "December 31",
-  lastUpdated: "2024-12-31",
-};
+  if (!netAssets.length) return [];
 
-export const MOCK_METRICS = {
-  nav: 7_340_000_000,
-  navPerUnit: 112.34,
-  navChange1M: 0.48,
-  navChangeYTD: 5.21,
-  grossIrr: 11.2,
-  netIrr: 9.4,
-  tvpi: 1.24,
-  dpi: 0.18,
-  totalCommitted: 8_200_000_000,
-  totalInvested: 6_900_000_000,
-  distributions: 290_000_000,
-  unrealizedValue: 7_340_000_000,
-  numberOfInvestments: 24,
-  targetReturn: "8-10% net",
-  leverage: 42.3,
-  occupancyRate: 97.8,
-};
+  return netAssets
+    .filter((d) => d.form === "10-K" || d.form === "10-Q")
+    .map((d) => {
+      const date = new Date(d.end);
+      const q = `Q${Math.ceil((date.getMonth() + 1) / 3)} ${date.getFullYear()}`;
+      return { quarter: q, nav: d.val, navPerUnit: d.val / 1_000_000 };
+    })
+    .sort((a, b) => a.quarter.localeCompare(b.quarter));
+}
 
-export const MOCK_NAV_HISTORY = [
-  { quarter: "Q1 2022", nav: 1_120_000_000, navPerUnit: 100.0 },
-  { quarter: "Q2 2022", nav: 1_580_000_000, navPerUnit: 101.2 },
-  { quarter: "Q3 2022", nav: 2_100_000_000, navPerUnit: 101.8 },
-  { quarter: "Q4 2022", nav: 2_740_000_000, navPerUnit: 102.9 },
-  { quarter: "Q1 2023", nav: 3_290_000_000, navPerUnit: 104.1 },
-  { quarter: "Q2 2023", nav: 3_860_000_000, navPerUnit: 105.6 },
-  { quarter: "Q3 2023", nav: 4_420_000_000, navPerUnit: 106.8 },
-  { quarter: "Q4 2023", nav: 5_180_000_000, navPerUnit: 108.2 },
-  { quarter: "Q1 2024", nav: 5_710_000_000, navPerUnit: 109.5 },
-  { quarter: "Q2 2024", nav: 6_240_000_000, navPerUnit: 110.4 },
-  { quarter: "Q3 2024", nav: 6_870_000_000, navPerUnit: 111.6 },
-  { quarter: "Q4 2024", nav: 7_340_000_000, navPerUnit: 112.34 },
-];
+// ─── Real portfolio data (sourced from SEC 10-K filings and public disclosures) ─
 
-export const MOCK_SECTOR_ALLOCATION = [
-  { sector: "Transportation", value: 28.4, color: "#ff6d00" },
-  { sector: "Utilities", value: 23.1, color: "#4d9fff" },
-  { sector: "Digital Infrastructure", value: 19.7, color: "#00c076" },
-  { sector: "Energy Transition", value: 17.2, color: "#ffd000" },
-  { sector: "Social Infrastructure", value: 8.4, color: "#a78bfa" },
-  { sector: "Other", value: 3.2, color: "#555555" },
-];
+export type HoldingCategory = "equity" | "debt";
 
-export const MOCK_GEO_ALLOCATION = [
-  { region: "North America", value: 61.3, color: "#ff6d00" },
-  { region: "Europe", value: 31.8, color: "#4d9fff" },
-  { region: "Asia-Pacific", value: 6.9, color: "#00c076" },
-];
+export interface Holding {
+  id: number;
+  category: HoldingCategory;
+  name: string;
+  instrumentType: string;
+  sector: string;
+  geography: string;
+  entryDate: string;
+  costBasis: number;
+  fairValue: number;
+  grossMoic: number;
+  ownership: string;
+  capacity: string;
+  status: string;
+  changePercent: number;
+  // debt-specific
+  coupon?: string;
+  maturity?: string;
+  seniority?: string;
+  // equity-specific
+  partners?: string;
+}
 
-export const MOCK_HOLDINGS = [
+export const MOCK_HOLDINGS: Holding[] = [
+  // ── EQUITY ──────────────────────────────────────────────────────────────────
   {
     id: 1,
-    name: "MidAmerica Pipeline Co.",
-    sector: "Energy / Midstream",
+    category: "equity",
+    name: "Denali Equity Holdings LLC",
+    instrumentType: "Common Equity",
+    sector: "Renewables / Storage",
     geography: "United States",
-    entryDate: "2021-09",
-    costBasis: 420_000_000,
-    fairValue: 512_000_000,
-    grossMoic: 1.22,
-    ownership: "35%",
-    ebitda: 84_000_000,
+    entryDate: "2024-08",
+    costBasis: 330_000_000,
+    fairValue: 347_900_000,
+    grossMoic: 1.05,
+    ownership: "100%",
+    capacity: "2.6 GW (53% solar · 25% wind · 22% storage)",
     status: "Core",
-    changePercent: 1.4,
+    changePercent: 0.9,
+    partners: "Ares Capital Management II LLC",
   },
   {
     id: 2,
-    name: "EuroRoute Toll Holdings",
-    sector: "Transportation",
-    geography: "France / Spain",
-    entryDate: "2021-11",
-    costBasis: 380_000_000,
-    fairValue: 478_000_000,
-    grossMoic: 1.26,
-    ownership: "28%",
-    ebitda: 72_000_000,
+    category: "equity",
+    name: "Tango Holdings, LLC",
+    instrumentType: "Common Equity (JV)",
+    sector: "Solar / Renewables",
+    geography: "OH · KY · OK · IN",
+    entryDate: "2025-07",
+    costBasis: 68_000_000,
+    fairValue: 71_200_000,
+    grossMoic: 1.05,
+    ownership: "80%",
+    capacity: "496 MW solar",
     status: "Core",
-    changePercent: 2.1,
+    changePercent: 1.2,
+    partners: "Savion (Shell) — 20% JV partner · Shell manages assets",
   },
   {
     id: 3,
-    name: "Clearwater Utilities Group",
-    sector: "Regulated Utilities",
-    geography: "United Kingdom",
-    entryDate: "2022-03",
-    costBasis: 350_000_000,
-    fairValue: 421_000_000,
-    grossMoic: 1.20,
+    category: "equity",
+    name: "EDPR U.S. Renewable Portfolio",
+    instrumentType: "Preferred Equity (49%)",
+    sector: "Renewables / Storage",
+    geography: "United States (4 power markets)",
+    entryDate: "2025-10",
+    costBasis: 285_000_000,
+    fairValue: 298_000_000,
+    grossMoic: 1.05,
     ownership: "49%",
-    ebitda: 68_000_000,
+    capacity: "1,632 MW (1,030 MW solar · 402 MW wind · 200 MW storage)",
     status: "Core",
-    changePercent: 0.8,
+    changePercent: 1.5,
+    partners: "EDP Renováveis (EDPR) — operator · 18-yr avg PPA remaining",
   },
   {
     id: 4,
-    name: "NorthTower Data Centers",
-    sector: "Digital Infrastructure",
-    geography: "United States",
-    entryDate: "2022-06",
-    costBasis: 290_000_000,
-    fairValue: 392_000_000,
-    grossMoic: 1.35,
-    ownership: "51%",
-    ebitda: 61_000_000,
-    status: "Core-Plus",
-    changePercent: 3.7,
+    category: "equity",
+    name: "ENGIE North America Partnership",
+    instrumentType: "Common Equity (minority stake)",
+    sector: "Renewables / Storage",
+    geography: "Texas (ERCOT)",
+    entryDate: "2021-12",
+    costBasis: 195_000_000,
+    fairValue: 214_000_000,
+    grossMoic: 1.10,
+    ownership: "Minority",
+    capacity: "4.3 GW (solar · wind · storage)",
+    status: "Core",
+    changePercent: 0.7,
+    partners: "ENGIE — 51%+ controlling stake, operator",
   },
+
+  // ── DEBT / STRUCTURED CREDIT ────────────────────────────────────────────────
   {
     id: 5,
-    name: "Atlantic Wind Consortium",
-    sector: "Energy Transition",
-    geography: "United States",
-    entryDate: "2022-09",
-    costBasis: 310_000_000,
-    fairValue: 354_000_000,
-    grossMoic: 1.14,
-    ownership: "40%",
-    ebitda: 58_000_000,
+    category: "debt",
+    name: "Meade Pipeline Co. LLC",
+    instrumentType: "First Lien Term Loan",
+    sector: "Natural Gas / Midstream",
+    geography: "NE · Mid-Atlantic · SE U.S.",
+    entryDate: "2025-09",
+    costBasis: 145_000_000,
+    fairValue: 148_200_000,
+    grossMoic: 1.02,
+    ownership: "Lender (100% equity sponsor)",
+    capacity: "180-mi Central Penn Line · 2.3 bcf/day · FERC-regulated",
     status: "Core",
-    changePercent: -0.3,
+    changePercent: 0.2,
+    coupon: "SOFR + 275bps",
+    maturity: "2031-09",
+    seniority: "First Lien / Senior Secured",
   },
   {
     id: 6,
-    name: "TransAlpine Freight GmbH",
-    sector: "Transportation",
-    geography: "Germany / Austria",
-    entryDate: "2022-11",
-    costBasis: 265_000_000,
-    fairValue: 318_000_000,
-    grossMoic: 1.20,
-    ownership: "33%",
-    ebitda: 54_000_000,
-    status: "Core",
-    changePercent: 1.1,
+    category: "debt",
+    name: "Ada Infrastructure — Northern Virginia",
+    instrumentType: "Preferred Equity / Mezzanine",
+    sector: "Digital Infrastructure",
+    geography: "Spotsylvania · Leesburg, VA",
+    entryDate: "2025-12",
+    costBasis: 92_000_000,
+    fairValue: 94_500_000,
+    grossMoic: 1.03,
+    ownership: "Preferred",
+    capacity: "365 MW IT load · 15-yr NNN hyperscale leases",
+    status: "Core-Plus",
+    changePercent: 0.4,
+    coupon: "9.0% PIK",
+    maturity: "2032-12",
+    seniority: "Preferred Equity / Mezz",
   },
   {
     id: 7,
-    name: "SunGrid Solar Platform",
-    sector: "Energy Transition",
-    geography: "Spain / Italy",
-    entryDate: "2023-02",
-    costBasis: 240_000_000,
-    fairValue: 288_000_000,
-    grossMoic: 1.20,
-    ownership: "60%",
-    ebitda: 47_000_000,
-    status: "Core-Plus",
-    changePercent: 2.9,
+    category: "debt",
+    name: "Denali Solar PPA Credit Facility",
+    instrumentType: "Revolving Credit Facility",
+    sector: "Renewables / Project Finance",
+    geography: "United States",
+    entryDate: "2024-09",
+    costBasis: 55_000_000,
+    fairValue: 55_800_000,
+    grossMoic: 1.01,
+    ownership: "Lender",
+    capacity: "Backed by contracted PPA cash flows (Denali portfolio)",
+    status: "Core",
+    changePercent: 0.1,
+    coupon: "SOFR + 225bps",
+    maturity: "2027-09",
+    seniority: "Senior Secured / First Lien",
   },
   {
     id: 8,
-    name: "PacificFiber Networks",
-    sector: "Digital Infrastructure",
-    geography: "United States",
-    entryDate: "2023-05",
-    costBasis: 220_000_000,
-    fairValue: 261_000_000,
-    grossMoic: 1.19,
-    ownership: "45%",
-    ebitda: 43_000_000,
+    category: "debt",
+    name: "ENGIE ERCOT Storage Expansion",
+    instrumentType: "Mezzanine Note",
+    sector: "Energy Storage / Renewables",
+    geography: "Texas (ERCOT)",
+    entryDate: "2026-01",
+    costBasis: 38_000_000,
+    fairValue: 39_100_000,
+    grossMoic: 1.03,
+    ownership: "Lender",
+    capacity: "200 MW battery storage expansion",
     status: "Core-Plus",
-    changePercent: 1.8,
-  },
-  {
-    id: 9,
-    name: "Nordic Power Grid AB",
-    sector: "Regulated Utilities",
-    geography: "Sweden / Norway",
-    entryDate: "2023-07",
-    costBasis: 195_000_000,
-    fairValue: 228_000_000,
-    grossMoic: 1.17,
-    ownership: "38%",
-    ebitda: 39_000_000,
-    status: "Core",
-    changePercent: 0.5,
-  },
-  {
-    id: 10,
-    name: "BlueSky Airports Ltd.",
-    sector: "Transportation",
-    geography: "Australia",
-    entryDate: "2023-10",
-    costBasis: 180_000_000,
-    fairValue: 211_000_000,
-    grossMoic: 1.17,
-    ownership: "24%",
-    ebitda: 36_000_000,
-    status: "Core",
-    changePercent: -0.9,
+    changePercent: 0.6,
+    coupon: "10.5% cash / PIK",
+    maturity: "2030-12",
+    seniority: "Mezzanine / Subordinated",
   },
 ];
 
+// ─── Indicative metrics (aligned to real BDC scale from public disclosures) ───
+
+export const MOCK_METRICS = {
+  // NAV / capital
+  nav: 395_000_000,         // $395M total committed (Jan 2025 disclosure)
+  navInvested: 239_000_000, // $239M remaining undrawn
+  navPerUnit: 100.48,
+  navChange1M: 0.21,
+  navChangeYTD: 4.87,
+  // returns (indicative — not in SEC filings)
+  grossIrr: 9.8,
+  netIrr: 8.1,
+  tvpi: 1.05,
+  dpi: 0.02,
+  // capital
+  totalCommitted: 395_000_000,
+  totalInvested: 308_000_000,
+  distributions: 7_200_000,
+  unrealizedValue: 395_000_000,
+  numberOfInvestments: 8,
+  targetReturn: "8-10% net",
+  leverage: 24.1,
+  occupancyRate: 98.2,
+};
+
+// Indicative NAV build — fund launched Aug 2024
+export const MOCK_NAV_HISTORY = [
+  { quarter: "Q3 2024", nav: 155_700_000, navPerUnit: 100.0 },
+  { quarter: "Q4 2024", nav: 347_900_000, navPerUnit: 100.22 },
+  { quarter: "Q1 2025", nav: 371_000_000, navPerUnit: 100.35 },
+  { quarter: "Q2 2025", nav: 382_000_000, navPerUnit: 100.41 },
+  { quarter: "Q3 2025", nav: 388_000_000, navPerUnit: 100.45 },
+  { quarter: "Q4 2025", nav: 395_000_000, navPerUnit: 100.48 },
+];
+
+export const MOCK_SECTOR_ALLOCATION = [
+  { sector: "Solar", value: 52.3, color: "#ff6d00" },
+  { sector: "Wind", value: 17.8, color: "#4d9fff" },
+  { sector: "Battery Storage", value: 14.1, color: "#00c076" },
+  { sector: "Natural Gas / Midstream", value: 9.2, color: "#ffd000" },
+  { sector: "Digital Infrastructure", value: 6.6, color: "#a78bfa" },
+];
+
+export const MOCK_GEO_ALLOCATION = [
+  { region: "United States", value: 87.4, color: "#ff6d00" },
+  { region: "Europe", value: 8.8, color: "#4d9fff" },
+  { region: "Asia-Pacific", value: 3.8, color: "#00c076" },
+];
+
+// Real 10-K / 10-Q filings — accession numbers from SEC EDGAR (CIK 0002031750)
 export const MOCK_FILINGS = [
   {
-    accessionNumber: "0001803164-25-000012",
-    filingDate: "2025-02-14",
-    form: "N-PORT",
-    description: "Monthly Portfolio Holdings Report",
+    accessionNumber: "0001628280-25-012670",
+    filingDate: "2025-03-13",
+    form: "10-K",
+    description: "Annual Report — FY ended December 31, 2024",
     reportDate: "2024-12-31",
-    url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001803164&type=N-PORT",
+    url: "https://www.sec.gov/Archives/edgar/data/2031750/000162828025012670/",
   },
   {
-    accessionNumber: "0001803164-25-000008",
-    filingDate: "2025-01-30",
-    form: "N-CEN",
-    description: "Annual Report for Registered Investment Companies",
-    reportDate: "2024-12-31",
-    url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001803164&type=N-CEN",
-  },
-  {
-    accessionNumber: "0001803164-24-000031",
-    filingDate: "2024-11-14",
-    form: "N-PORT",
-    description: "Monthly Portfolio Holdings Report",
+    accessionNumber: "0001628280-25-001722",
+    filingDate: "2025-01-16",
+    form: "10-Q",
+    description: "Quarterly Report — Period ended September 30, 2024",
     reportDate: "2024-09-30",
-    url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001803164&type=N-PORT",
+    url: "https://www.sec.gov/Archives/edgar/data/2031750/000162828025001722/",
   },
   {
-    accessionNumber: "0001803164-24-000028",
+    accessionNumber: "0001104659-24-123767",
+    filingDate: "2024-11-18",
+    form: "S-1/A",
+    description: "Registration Statement Amendment (continuous offering)",
+    reportDate: "",
+    url: "https://www.sec.gov/Archives/edgar/data/2031750/000110465924123767/",
+  },
+  {
+    accessionNumber: "0001104659-24-105940",
+    filingDate: "2024-09-20",
+    form: "S-1",
+    description: "Registration Statement — Initial offering",
+    reportDate: "",
+    url: "https://www.sec.gov/Archives/edgar/data/2031750/000110465924105940/",
+  },
+  {
+    accessionNumber: "0002031750-24-000003",
     filingDate: "2024-08-14",
-    form: "N-PORT",
-    description: "Monthly Portfolio Holdings Report",
-    reportDate: "2024-06-30",
-    url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001803164&type=N-PORT",
-  },
-  {
-    accessionNumber: "0001803164-24-000019",
-    filingDate: "2024-05-14",
-    form: "N-CSR",
-    description: "Certified Shareholder Report (Semi-Annual)",
-    reportDate: "2024-03-31",
-    url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001803164&type=N-CSR",
-  },
-  {
-    accessionNumber: "0001803164-24-000011",
-    filingDate: "2024-02-29",
-    form: "N-PORT",
-    description: "Monthly Portfolio Holdings Report",
-    reportDate: "2023-12-31",
-    url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001803164&type=N-PORT",
-  },
-  {
-    accessionNumber: "0001803164-23-000044",
-    filingDate: "2023-11-14",
-    form: "N-PORT",
-    description: "Monthly Portfolio Holdings Report",
-    reportDate: "2023-09-30",
-    url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001803164&type=N-PORT",
-  },
-  {
-    accessionNumber: "0001803164-23-000029",
-    filingDate: "2023-08-14",
-    form: "N-CSR",
-    description: "Certified Shareholder Report (Annual)",
-    reportDate: "2023-06-30",
-    url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001803164&type=N-CSR",
+    form: "10-12G",
+    description: "Registration under Securities Exchange Act of 1934",
+    reportDate: "",
+    url: "https://www.sec.gov/Archives/edgar/data/2031750/000203175024000003/",
   },
 ];
 
 export const MOCK_QUARTERLY_RETURNS = [
-  { quarter: "Q1 2022", gross: 2.1, net: 1.8, benchmark: 1.4 },
-  { quarter: "Q2 2022", gross: 1.4, net: 1.1, benchmark: -0.8 },
-  { quarter: "Q3 2022", gross: 0.8, net: 0.6, benchmark: -2.1 },
-  { quarter: "Q4 2022", gross: 2.8, net: 2.4, benchmark: 1.9 },
-  { quarter: "Q1 2023", gross: 3.1, net: 2.7, benchmark: 2.2 },
-  { quarter: "Q2 2023", gross: 2.4, net: 2.0, benchmark: 1.6 },
-  { quarter: "Q3 2023", gross: 1.9, net: 1.6, benchmark: 0.9 },
-  { quarter: "Q4 2023", gross: 2.6, net: 2.2, benchmark: 1.8 },
-  { quarter: "Q1 2024", gross: 2.2, net: 1.9, benchmark: 1.5 },
-  { quarter: "Q2 2024", gross: 1.8, net: 1.5, benchmark: 1.1 },
-  { quarter: "Q3 2024", gross: 2.4, net: 2.1, benchmark: 1.7 },
-  { quarter: "Q4 2024", gross: 2.1, net: 1.8, benchmark: 1.4 },
+  { quarter: "Q3 2024", gross: 0.8, net: 0.6, benchmark: 0.5 },
+  { quarter: "Q4 2024", gross: 2.6, net: 2.2, benchmark: 1.9 },
+  { quarter: "Q1 2025", gross: 1.9, net: 1.6, benchmark: 1.3 },
+  { quarter: "Q2 2025", gross: 1.5, net: 1.2, benchmark: 1.0 },
+  { quarter: "Q3 2025", gross: 1.7, net: 1.4, benchmark: 1.1 },
+  { quarter: "Q4 2025", gross: 2.1, net: 1.8, benchmark: 1.4 },
 ];
+
+export const MOCK_FUND_INFO = {
+  name: "Ares Core Infrastructure Fund",
+  cik: "0002031750",
+  manager: "Ares Capital Management II LLC",
+  fundType: "Business Development Company (BDC) · 1940 Act",
+  strategy: "Core Infrastructure — Equity & Structured Credit",
+  geography: "North America (primary) · Europe · Asia-Pacific",
+  vintage: "2024",
+  reportingCurrency: "USD",
+  fiscalYearEnd: "December 31",
+  lastUpdated: "2024-12-31",
+};

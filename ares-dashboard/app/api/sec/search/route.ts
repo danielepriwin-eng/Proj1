@@ -1,16 +1,8 @@
 import { NextResponse } from "next/server";
-import { searchSecFilings, MOCK_FILINGS } from "@/lib/sec-api";
+import { MOCK_FILINGS } from "@/lib/sec-api";
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const q = searchParams.get("q") ?? '"Ares Core Infrastructure"';
-  const forms = searchParams.get("forms") ?? "N-PORT,N-CSR,N-2,D";
-
-  const results = await searchSecFilings(q, forms);
-
-  if (results?.hits?.hits?.length) {
-    return NextResponse.json({ source: "sec-edgar", results });
-  }
-
+// Note: BDC search is better served via the submissions API.
+// This route is retained for completeness; it returns known filings.
+export async function GET() {
   return NextResponse.json({ source: "mock", filings: MOCK_FILINGS });
 }

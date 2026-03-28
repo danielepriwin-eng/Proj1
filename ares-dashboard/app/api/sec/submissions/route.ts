@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   fetchCompanySubmissions,
-  parseFiling,
+  parseFilings,
   MOCK_FILINGS,
   MOCK_FUND_INFO,
 } from "@/lib/sec-api";
@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const submissions = await fetchCompanySubmissions(cik);
 
   if (submissions) {
-    const filings = parseFiling(submissions).slice(0, 20);
+    const filings = parseFilings(submissions).slice(0, 20);
     return NextResponse.json({
       source: "sec-edgar",
       company: {

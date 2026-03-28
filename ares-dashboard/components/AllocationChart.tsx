@@ -18,6 +18,7 @@ interface AllocationItem {
 interface AllocationChartProps {
   sectorData: AllocationItem[];
   geoData: AllocationItem[];
+  isLoading?: boolean;
 }
 
 const CustomTooltip = ({
@@ -138,10 +139,46 @@ function DonutChart({
   );
 }
 
+function AllocationSkeleton({ accentColor }: { accentColor: string }) {
+  return (
+    <div
+      className="p-4 flex-1"
+      style={{
+        backgroundColor: "var(--bg-card)",
+        border: "1px solid var(--border)",
+        borderTop: `2px solid ${accentColor}`,
+      }}
+    >
+      <div className="h-2 w-16 rounded mb-2" style={{ backgroundColor: "var(--border-bright)", opacity: 0.6 }} />
+      <div className="h-3 w-24 rounded mb-4" style={{ backgroundColor: "var(--border-bright)", opacity: 0.5 }} />
+      <div className="flex items-center gap-4">
+        <div className="w-[110px] h-[110px] rounded-full border-[18px]" style={{ borderColor: "var(--border-bright)", opacity: 0.4, flexShrink: 0 }} />
+        <div className="flex flex-col gap-2 flex-1">
+          {[80, 65, 90, 55, 70].map((w, i) => (
+            <div key={i} className="flex justify-between">
+              <div className="h-2 rounded" style={{ width: `${w}%`, backgroundColor: "var(--border-bright)", opacity: 0.4 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AllocationChart({
   sectorData,
   geoData,
+  isLoading,
 }: AllocationChartProps) {
+  if (isLoading) {
+    return (
+      <div className="flex gap-3">
+        <AllocationSkeleton accentColor="var(--orange)" />
+        <AllocationSkeleton accentColor="var(--blue)" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex gap-3">
       <DonutChart

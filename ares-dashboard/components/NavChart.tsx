@@ -19,6 +19,7 @@ interface NavDataPoint {
 
 interface NavChartProps {
   data: NavDataPoint[];
+  isLoading?: boolean;
 }
 
 const CustomTooltip = ({
@@ -67,7 +68,7 @@ const CustomTooltip = ({
   );
 };
 
-export default function NavChart({ data }: NavChartProps) {
+export default function NavChart({ data, isLoading }: NavChartProps) {
   return (
     <div
       className="p-4"
@@ -113,6 +114,24 @@ export default function NavChart({ data }: NavChartProps) {
 
       {/* Chart */}
       <div style={{ height: "220px" }}>
+        {isLoading ? (
+          <div
+            className="w-full h-full flex items-end gap-1 px-2 pb-4"
+            style={{ opacity: 0.3 }}
+          >
+            {[40, 55, 48, 62, 70, 75, 80, 85, 90, 88, 94, 100].map((h, i) => (
+              <div
+                key={i}
+                className="flex-1 rounded-t"
+                style={{
+                  height: `${h}%`,
+                  backgroundColor: "var(--orange)",
+                  opacity: 0.4 + i * 0.05,
+                }}
+              />
+            ))}
+          </div>
+        ) : (
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={data}
@@ -202,6 +221,7 @@ export default function NavChart({ data }: NavChartProps) {
             />
           </AreaChart>
         </ResponsiveContainer>
+        )}
       </div>
     </div>
   );
