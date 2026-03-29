@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd ares-dashboard && npm install && npm run build",
+  "outputDirectory": "ares-dashboard/.next",
+  "installCommand": "cd ares-dashboard && npm install",
+  "devCommand": "cd ares-dashboard && npm run dev",
+  "framework": "nextjs"
+}
